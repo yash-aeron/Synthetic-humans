@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: synthetic_humans_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: synthetic_humans
+      POSTGRES_USER: synthetic
+      POSTGRES_PASSWORD: synthetic
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synthetic -d synthetic_humans"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: synthetic_humans_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: synthetic_humans_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - HOST=0.0.0.0
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://synthetic:synthetic@postgres:5432/synthetic_humans
+      - REDIS_URL=redis://redis:6379/0
+      - DEFAULT_LLM_PROVIDER=mock
+      - HEADLESS_BROWSER=true
+      - MAX_CONCURRENT_BROWSERS=5
+      - STORAGE_DIR=/app/data/screenshots
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: synthetic_humans_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+  demo-app:
+    build:
+      context: .
+      dockerfile: tests/fixtures/demo-app/Dockerfile
+    container_name: synthetic_humans_demo_app
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    environment:
+      - PORT=5050
+      - HOST=0.0.0.0
+
+volumes:
+  postgres_data:
